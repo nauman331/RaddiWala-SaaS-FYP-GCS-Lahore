@@ -2,7 +2,6 @@ import { AuthRoutes } from "./src/routes/auth.route";
 import { connectDB } from "./src/config/db";
 
 await connectDB();
-
 const server = Bun.serve({
   port: Number(process.env.PORT),
   routes: {
