@@ -1,4 +1,5 @@
-import { User, type IUser } from "../models/user.model";
+import mysql from "../config/sqldb";
+import type { IUser } from "../types";
 import { sendPasswordResetEmail } from "../utils/mailsender";
 import { randomUUIDv7 } from "bun";
 import { signToken } from "../utils/jwttoken";
@@ -10,42 +11,51 @@ const register = async (req: Request): Promise<Response> => {
         if(!username || !password || !email || !phone) {
             return new Response('Missing required fields', { status: 400 });
         }
-        const existingEmail = await User.findByEmail(email);
+        
+        const [existingEmail] = await mysql<IUser[]>`
+            SELECT * FROM users WHERE email = ${email}
+        `;
         if (existingEmail) {
             return new Response('Email already in use', { status: 400 });
         }
 
-        const existingPhone = await User.findByPhone(phone);
+        const [existingPhone] = await mysql<IUser[]>`
+            SELECT * FROM users WHERE phone = ${phone}
+        `;
         if (existingPhone) {
             return new Response('Phone number already in use', { status: 400 });
         }
+        
         const hashedPassword = await Bun.password.hash(password, "bcrypt");
         const token = randomUUIDv7();
+        const tokenExpiry = new Date(Date.now() + 24 * 3600000); //24 Hours
+        
         await sendPasswordResetEmail(email, `${process.env.FRONTEND_URL}/verify-email?token=${token}`);
-        await User.create({
-            username,
-            email,
-            password: hashedPassword,
-            phone,
-            role: "user",
-            isVerified: false,
-            token,
-            tokenExpiry: new Date(Date.now() + 24 * 3600000) //24 Hours
-        });
+        
+        await mysql`
+            INSERT INTO users (username, email, password, phone, role, isVerified, token, tokenExpiry)
+            VALUES (${username}, ${email}, ${hashedPassword}, ${phone}, 'user', false, ${token}, ${tokenExpiry})
+        `;
+        
         return new Response('Register successful Please Verify Your Email', { status: 200 });
     } catch (error) {
         console.error('Register error:', error);
         return new Response('Register failed', { status: 500 });
     }
 }
+
 const verifyEmail = async (req: Request): Promise<Response> => {
     try {
         const { email, token } = await req.json() as IUser;
         if(!email || !token) {
             return new Response('Missing required fields', { status: 400 });
         }
-        const user = await User.findByEmail(email);
-            if (!user) {
+        
+        const [user] = await mysql<IUser[]>`
+            SELECT * FROM users WHERE email = ${email}
+        `;
+        
+        if (!user) {
             return new Response('Invalid token or email', { status: 400 });
         }
         if (!user.token) {
@@ -57,22 +67,33 @@ const verifyEmail = async (req: Request): Promise<Response> => {
         if (user.token !== token) {
             return new Response('Invalid token', { status: 400 });
         }
-        await User.updateUser(user.id, { isVerified: true, token: undefined, tokenExpiry: undefined });
+        
+        await mysql`
+            UPDATE users SET isVerified = true, token = NULL, tokenExpiry = NULL 
+            WHERE id = ${user.id}
+        `;
+        
         return new Response('Email verified successfully', { status: 200 });
     } catch (error) {
         return new Response('Email verification failed', { status: 500 });
     }
 }
+
 const login = async (req: Request): Promise<Response> => {
     try {
         const {email, password} = await req.json() as IUser;
         if(!email || !password) {
             return new Response('Missing required fields', { status: 400 });
         }
-        const user = await User.findByEmail(email);
+        
+        const [user] = await mysql<IUser[]>`
+            SELECT * FROM users WHERE email = ${email}
+        `;
+        
         if (!user) {
             return new Response('Email Not registered', { status: 401 });
         }
+        
         const isPasswordValid = await Bun.password.verify(password, user.password, "bcrypt");
         if (!isPasswordValid) {
             return new Response('Invalid password', { status: 401 });
@@ -80,6 +101,7 @@ const login = async (req: Request): Promise<Response> => {
         if (!user.isVerified) {
             return new Response('Email not verified', { status: 403 });
         }
+        
         const token = signToken(user.id.toString());
         return Response.json({ token, userId: user.id, role: user.role, isOk: true }, { status: 200 });
     } catch (error) {
@@ -87,55 +109,111 @@ const login = async (req: Request): Promise<Response> => {
         return new Response('Login failed', { status: 500 });
     }
 }
+
 const resendVerificationEmail = async (req: Request): Promise<Response> => {
     try {
         const { email } = await req.json() as IUser;
         if(!email) {
             return new Response('Missing required fields', { status: 400 });
         }
-        const user = await User.findByEmail(email);
+        
+        const [user] = await mysql<IUser[]>`
+            SELECT * FROM users WHERE email = ${email}
+        `;
+        
         if (!user) {
             return new Response('Email Not registered', { status: 401 });
         }
+        
         const token = randomUUIDv7();
-        await User.updateUser(user.id, { token, tokenExpiry: new Date(Date.now() + 24 * 3600000) }); //24 Hours
+        const tokenExpiry = new Date(Date.now() + 24 * 3600000); //24 Hours
+        
+        await mysql`
+            UPDATE users SET token = ${token}, tokenExpiry = ${tokenExpiry} 
+            WHERE id = ${user.id}
+        `;
+        
         await sendPasswordResetEmail(email, `${process.env.FRONTEND_URL}/verify-email?token=${token}`);
         return new Response('Verification email resent successfully', { status: 200 });
     } catch (error) {
         return new Response('Resending verification email failed', { status: 500 });
     }
 }
+
 const getMe = async (req: Request): Promise<Response> => {
     try {
         const user = (req as any).user;
         if (!user) {
             return new Response('Unauthorized', { status: 401 });
         }
+        
         const cachedUser = await redis.get(`user:${user.userId}`);
         if (cachedUser) {
             return Response.json({ user: JSON.parse(cachedUser) }, { status: 200 });
         }
-        const userData = await User.findById(user.userId);
+        
+        const [userData] = await mysql<IUser[]>`
+            SELECT * FROM users WHERE id = ${user.userId}
+        `;
+        
         if (!userData) {
             return new Response('User not found', { status: 404 });
         }
-        await redis.setex(`user:${user.userId}`, 3600, JSON.stringify(userData)); // Cache for 1 hour
+        
+        await redis.set(`user:${user.userId}`, JSON.stringify(userData));
         return Response.json({ user: userData }, { status: 200 });
     } catch (error) {
         return new Response('Failed to fetch user data', { status: 500 });
     }
 }
+
 const deleteMe = async (req: Request): Promise<Response> => {
     try {
         const user = (req as any).user;
         if (!user) {
             return new Response('Unauthorized', { status: 401 });
         }
-        await User.deleteUser(user.userId);
+        
+        await mysql`
+            DELETE FROM users WHERE id = ${user.userId}
+        `;
+        
         await redis.del(`user:${user.userId}`);
         return new Response('User deleted successfully', { status: 200 });
     } catch (error) {
         return new Response('Failed to delete user', { status: 500 });
     }
 }
-export { register,login, verifyEmail, resendVerificationEmail, getMe, deleteMe };
+
+const resetPassword = async (req: Request): Promise<Response> => {
+    try {
+        const { email, password, token } = await req.json() as IUser;
+        if(!email || !password || !token) {
+            return new Response('Missing required fields', { status: 400 });
+        }
+
+        const [user] = await mysql<IUser[]>`
+        SELECT * FROM users WHERE email = ${email}
+        `;
+        if(!user) {
+            return new Response('User not found', { status: 404 });
+        }
+        if (user.token !== token) {
+            return new Response('Invalid token', { status: 400 });
+        }
+        if (!user.tokenExpiry || new Date(user.tokenExpiry) < new Date()) {
+            return new Response('Token has expired! Request a new one', { status: 400 });
+        }
+        const hashedPassword = await Bun.password.hash(password, "bcrypt");
+        await mysql`
+        UPDATE users SET password = ${hashedPassword}, token = NULL, tokenExpiry = NULL 
+        WHERE id = ${user.id}`;
+        
+        return new Response('Password reset successfully', { status: 200 });
+
+    } catch (error) {
+        return new Response('Failed to reset password', { status: 500 });
+    }
+}
+
+export { register, login, verifyEmail, resendVerificationEmail, getMe, deleteMe, resetPassword };

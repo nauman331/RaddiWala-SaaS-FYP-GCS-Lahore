@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 
 interface JwtPayload {
+  id: unknown;
   userId: string;
 }
 

@@ -1,3 +1,4 @@
+import mysql from '../config/sqldb';
 import { verifyToken } from '../utils/jwttoken';
 
 export interface AuthRequest extends Request {
@@ -20,8 +21,9 @@ const authMiddleware = (req: Request): { authorized: boolean; user?: any; error?
   }
 };
 
-const rolesMiddleware = (req: AuthRequest, allowedRoles: string[]): boolean => {
-  if (!req.user || !allowedRoles.includes(req.user.role)) {
+const rolesMiddleware = async (req: AuthRequest, allowedRoles: string[]): Promise<boolean> => {
+  const [user] = await mysql`SELECT * FROM users WHERE id = ${req.user.userId}`;
+  if (!user || !allowedRoles.includes(user.role)) {
     return false;
   }
   return true;

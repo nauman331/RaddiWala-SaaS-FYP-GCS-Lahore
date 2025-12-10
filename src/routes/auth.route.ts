@@ -16,7 +16,7 @@ export const AuthRoutes = {
     },
     '/api/v1/me': {
         GET: async (req: Request) => {
-            const authResult = authMiddleware(req);
+            const authResult = await authMiddleware(req);
             if (!authResult.authorized) {
                 return new Response(authResult.error || 'Unauthorized', { status: 401 });
             }
@@ -26,7 +26,7 @@ export const AuthRoutes = {
     },
     '/api/v1/me/delete': {
         DELETE: async (req:Request) => {
-            const authResult = authMiddleware(req);
+            const authResult = await authMiddleware(req);
             if (!authResult.authorized) {
                 return new Response(authResult.error || 'Unauthorized', { status: 401 });
             }
@@ -34,4 +34,7 @@ export const AuthRoutes = {
             return await AuthController.deleteMe(req);
         },
     },
-};
+    '/api/v1/reset-password': {
+    POST: async (req: Request) => await AuthController.resetPassword(req),
+    }
+}
