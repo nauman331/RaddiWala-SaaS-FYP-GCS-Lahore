@@ -66,3 +66,10 @@ const server = Bun.serve<WebSocketData>({
 });
 
 console.log(`Server running on port ${server.port}`);
+
+// SELECT id, full_name,
+//     ST_Distance_Sphere(location_point, POINT(user_lon, user_lat)) as distance
+// FROM users
+// WHERE role = 'collector'
+// AND is_online = 1
+// HAVING distance <= 2000;
