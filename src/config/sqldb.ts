@@ -7,6 +7,7 @@ const mysql = new SQL({
   database: process.env.DB_NAME,
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
+  ssl: process.env.DB_SSL_MODE === "REQUIRED" ? { rejectUnauthorized: true } : undefined,
 });
 
 export async function connectDB() {
