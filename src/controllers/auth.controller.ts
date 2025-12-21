@@ -1,17 +1,20 @@
 import mysql from "../config/sqldb";
 import type { IUser } from "../types";
 import { sendPasswordResetEmail } from "../utils/mailsender";
-import { randomUUIDv7 } from "bun";
 import { signToken } from "../utils/jwttoken";
 import redis from "../config/redis";
+
+const generateOTP = (): string => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 const register = async (req: Request): Promise<Response> => {
     try {
         const { username, password, email, phone } = await req.json() as IUser;
-        if(!username || !password || !email || !phone) {
+        if (!username || !password || !email || !phone) {
             return new Response('Missing required fields', { status: 400 });
         }
-        
+
         const [existingEmail] = await mysql<IUser[]>`
             SELECT * FROM users WHERE email = ${email}
         `;
@@ -25,19 +28,19 @@ const register = async (req: Request): Promise<Response> => {
         if (existingPhone) {
             return new Response('Phone number already in use', { status: 400 });
         }
-        
+
         const hashedPassword = await Bun.password.hash(password, "bcrypt");
-        const token = randomUUIDv7();
-        const tokenExpiry = new Date(Date.now() + 24 * 3600000); //24 Hours
-        
-        await sendPasswordResetEmail(email, `${process.env.FRONTEND_URL}/verify-email?token=${token}`);
-        
+        const otp = generateOTP();
+        const otpExpiry = new Date(Date.now() + 15 * 60000); // 15 minutes
+
+        await sendPasswordResetEmail(email, otp);
+
         await mysql`
-            INSERT INTO users (username, email, password, phone, role, isVerified, token, tokenExpiry)
-            VALUES (${username}, ${email}, ${hashedPassword}, ${phone}, 'user', false, ${token}, ${tokenExpiry})
+            INSERT INTO users (username, email, password, phone, role, isVerified, otp, otpExpiry)
+            VALUES (${username}, ${email}, ${hashedPassword}, ${phone}, 'user', false, ${otp}, ${otpExpiry})
         `;
-        
-        return new Response('Register successful Please Verify Your Email', { status: 200 });
+
+        return new Response('Register successful. Please check your email for OTP', { status: 200 });
     } catch (error) {
         console.error('Register error:', error);
         return new Response('Register failed', { status: 500 });
@@ -46,33 +49,33 @@ const register = async (req: Request): Promise<Response> => {
 
 const verifyEmail = async (req: Request): Promise<Response> => {
     try {
-        const { email, token } = await req.json() as IUser;
-        if(!email || !token) {
+        const { email, otp } = await req.json() as IUser & { otp: string };
+        if (!email || !otp) {
             return new Response('Missing required fields', { status: 400 });
         }
-        
+
         const [user] = await mysql<IUser[]>`
             SELECT * FROM users WHERE email = ${email}
         `;
-        
+
         if (!user) {
-            return new Response('Invalid token or email', { status: 400 });
+            return new Response('Invalid OTP or email', { status: 400 });
         }
-        if (!user.token) {
-            return new Response('No verification token found', { status: 400 });
+        if (!user.otp) {
+            return new Response('No verification OTP found', { status: 400 });
         }
-        if (!user.tokenExpiry || new Date(user.tokenExpiry) < new Date()) {
-            return new Response('Token has expired! Request a new one', { status: 400 });
+        if (!user.otpExpiry || new Date(user.otpExpiry) < new Date()) {
+            return new Response('OTP has expired! Request a new one', { status: 400 });
         }
-        if (user.token !== token) {
-            return new Response('Invalid token', { status: 400 });
+        if (user.otp !== otp) {
+            return new Response('Invalid OTP', { status: 400 });
         }
-        
+
         await mysql`
-            UPDATE users SET isVerified = true, token = NULL, tokenExpiry = NULL 
+            UPDATE users SET isVerified = true, otp = NULL, otpExpiry = NULL 
             WHERE id = ${user.id}
         `;
-        
+
         return new Response('Email verified successfully', { status: 200 });
     } catch (error) {
         return new Response('Email verification failed', { status: 500 });
@@ -81,19 +84,19 @@ const verifyEmail = async (req: Request): Promise<Response> => {
 
 const login = async (req: Request): Promise<Response> => {
     try {
-        const {email, password} = await req.json() as IUser;
-        if(!email || !password) {
+        const { email, password } = await req.json() as IUser;
+        if (!email || !password) {
             return new Response('Missing required fields', { status: 400 });
         }
-        
+
         const [user] = await mysql<IUser[]>`
             SELECT * FROM users WHERE email = ${email}
         `;
-        
+
         if (!user) {
             return new Response('Email Not registered', { status: 401 });
         }
-        
+
         const isPasswordValid = await Bun.password.verify(password, user.password, "bcrypt");
         if (!isPasswordValid) {
             return new Response('Invalid password', { status: 401 });
@@ -101,7 +104,7 @@ const login = async (req: Request): Promise<Response> => {
         if (!user.isVerified) {
             return new Response('Email not verified', { status: 403 });
         }
-        
+
         const token = signToken(user.id.toString());
         return Response.json({ token, userId: user.id, role: user.role, isOk: true }, { status: 200 });
     } catch (error) {
@@ -113,30 +116,30 @@ const login = async (req: Request): Promise<Response> => {
 const resendVerificationEmail = async (req: Request): Promise<Response> => {
     try {
         const { email } = await req.json() as IUser;
-        if(!email) {
+        if (!email) {
             return new Response('Missing required fields', { status: 400 });
         }
-        
+
         const [user] = await mysql<IUser[]>`
             SELECT * FROM users WHERE email = ${email}
         `;
-        
+
         if (!user) {
             return new Response('Email Not registered', { status: 401 });
         }
-        
-        const token = randomUUIDv7();
-        const tokenExpiry = new Date(Date.now() + 24 * 3600000); //24 Hours
-        
+
+        const otp = generateOTP();
+        const otpExpiry = new Date(Date.now() + 15 * 60000); // 15 minutes
+
         await mysql`
-            UPDATE users SET token = ${token}, tokenExpiry = ${tokenExpiry} 
+            UPDATE users SET otp = ${otp}, otpExpiry = ${otpExpiry} 
             WHERE id = ${user.id}
         `;
-        
-        await sendPasswordResetEmail(email, `${process.env.FRONTEND_URL}/verify-email?token=${token}`);
-        return new Response('Verification email resent successfully', { status: 200 });
+
+        await sendPasswordResetEmail(email, otp);
+        return new Response('Verification OTP resent successfully', { status: 200 });
     } catch (error) {
-        return new Response('Resending verification email failed', { status: 500 });
+        return new Response('Resending verification OTP failed', { status: 500 });
     }
 }
 
@@ -146,20 +149,20 @@ const getMe = async (req: Request): Promise<Response> => {
         if (!user) {
             return new Response('Unauthorized', { status: 401 });
         }
-        
+
         const cachedUser = await redis.get(`user:${user.userId}`);
         if (cachedUser) {
             return Response.json({ user: JSON.parse(cachedUser) }, { status: 200 });
         }
-        
+
         const [userData] = await mysql<IUser[]>`
             SELECT * FROM users WHERE id = ${user.userId}
         `;
-        
+
         if (!userData) {
             return new Response('User not found', { status: 404 });
         }
-        
+
         await redis.set(`user:${user.userId}`, JSON.stringify(userData));
         return Response.json({ user: userData }, { status: 200 });
     } catch (error) {
@@ -173,11 +176,11 @@ const deleteMe = async (req: Request): Promise<Response> => {
         if (!user) {
             return new Response('Unauthorized', { status: 401 });
         }
-        
+
         await mysql`
             DELETE FROM users WHERE id = ${user.userId}
         `;
-        
+
         await redis.del(`user:${user.userId}`);
         return new Response('User deleted successfully', { status: 200 });
     } catch (error) {
@@ -187,28 +190,28 @@ const deleteMe = async (req: Request): Promise<Response> => {
 
 const resetPassword = async (req: Request): Promise<Response> => {
     try {
-        const { email, password, token } = await req.json() as IUser;
-        if(!email || !password || !token) {
+        const { email, password, otp } = await req.json() as IUser & { otp: string };
+        if (!email || !password || !otp) {
             return new Response('Missing required fields', { status: 400 });
         }
 
         const [user] = await mysql<IUser[]>`
         SELECT * FROM users WHERE email = ${email}
         `;
-        if(!user) {
+        if (!user) {
             return new Response('User not found', { status: 404 });
         }
-        if (user.token !== token) {
-            return new Response('Invalid token', { status: 400 });
+        if (user.otp !== otp) {
+            return new Response('Invalid OTP', { status: 400 });
         }
-        if (!user.tokenExpiry || new Date(user.tokenExpiry) < new Date()) {
-            return new Response('Token has expired! Request a new one', { status: 400 });
+        if (!user.otpExpiry || new Date(user.otpExpiry) < new Date()) {
+            return new Response('OTP has expired! Request a new one', { status: 400 });
         }
         const hashedPassword = await Bun.password.hash(password, "bcrypt");
         await mysql`
-        UPDATE users SET password = ${hashedPassword}, token = NULL, tokenExpiry = NULL 
+        UPDATE users SET password = ${hashedPassword}, otp = NULL, otpExpiry = NULL 
         WHERE id = ${user.id}`;
-        
+
         return new Response('Password reset successfully', { status: 200 });
 
     } catch (error) {
@@ -216,4 +219,12 @@ const resetPassword = async (req: Request): Promise<Response> => {
     }
 }
 
-export { register, login, verifyEmail, resendVerificationEmail, getMe, deleteMe, resetPassword };
+const doGoogleLogin = async (req: Request): Promise<Response> => {
+    try {
+        return new Response('Google login not implemented yet', { status: 501 });
+    } catch (error) {
+        return new Response('Google login failed', { status: 500 });
+    }
+}
+
+export { register, login, verifyEmail, resendVerificationEmail, getMe, deleteMe, resetPassword, doGoogleLogin };

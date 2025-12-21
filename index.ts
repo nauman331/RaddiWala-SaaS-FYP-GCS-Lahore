@@ -16,7 +16,6 @@ const server = Bun.serve({
 
 initializeSocket(Number(process.env.SOCKET_PORT));
 
-// Setup socket controllers after Socket.IO initialization
 setupAllSocketControllers();
 
 console.log(`Server running on port ${server.port}`);

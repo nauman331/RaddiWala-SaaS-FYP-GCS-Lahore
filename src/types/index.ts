@@ -6,8 +6,8 @@ export interface IUser {
   phone: string;
   role: "user" | "admin";
   isVerified: boolean;
-  token?: string;
-  tokenExpiry?: Date;
+  otp?: string;
+  otpExpiry?: Date;
   createdAt: Date;
   updatedAt: Date;
 }

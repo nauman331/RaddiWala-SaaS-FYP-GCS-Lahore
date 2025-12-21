@@ -14,8 +14,8 @@ export async function userMigration() {
       profilePicture VARCHAR(255),
       role ENUM('customer', 'admin', 'support', 'collector') DEFAULT 'customer',
       isVerified BOOLEAN DEFAULT FALSE,
-      token VARCHAR(255),
-      tokenExpiry DATETIME,
+      otp VARCHAR(6),
+      otpExpiry DATETIME,
       createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
