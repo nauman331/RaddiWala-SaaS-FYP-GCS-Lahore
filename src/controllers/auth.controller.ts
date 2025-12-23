@@ -37,7 +37,7 @@ const register = async (req: Request): Promise<Response> => {
 
         await mysql`
             INSERT INTO users (username, email, password, phone, role, isVerified, otp, otpExpiry)
-            VALUES (${username}, ${email}, ${hashedPassword}, ${phone}, 'user', false, ${otp}, ${otpExpiry})
+            VALUES (${username}, ${email}, ${hashedPassword}, ${phone}, 'customer', false, ${otp}, ${otpExpiry})
         `;
 
         return Response.json({ message: 'Register successful. Please check your email for OTP' }, { status: 200 });
