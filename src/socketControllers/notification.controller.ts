@@ -1,26 +1,27 @@
-import { getIO } from "../config/socket";
+import { on, joinRoom, leaveRoom, sendToSocket, sendToRoom } from "../config/socket";
 
 export const setupNotificationController = () => {
-    const io = getIO();
+    on("connection", (data) => {
+        console.log(`Notification client connected: ${data.socketId}`);
+    });
 
-    io.on("connection", (socket) => {
-        console.log(`Notification client connected: ${socket.id}`);
+    on("subscribeNotifications", (message: any) => {
+        const data = message.data;
+        const socketId = message._socketId;
+        console.log(`Client ${socketId} subscribing to notifications:`, data);
+        joinRoom(socketId, `user:${data.userId}`);
+        sendToSocket(socketId, "notificationsSubscribed", { userId: data.userId });
+    });
 
-        socket.on("subscribeNotifications", (data) => {
-            console.log(`Client ${socket.id} subscribing to notifications:`, data);
-            socket.join(`user:${data.userId}`);
-            socket.emit("notificationsSubscribed", { userId: data.userId });
-        });
-
-        socket.on("unsubscribeNotifications", (data) => {
-            console.log(`Client ${socket.id} unsubscribing from notifications:`, data);
-            socket.leave(`user:${data.userId}`);
-        });
+    on("unsubscribeNotifications", (message: any) => {
+        const data = message.data;
+        const socketId = message._socketId;
+        console.log(`Client ${socketId} unsubscribing from notifications:`, data);
+        leaveRoom(socketId, `user:${data.userId}`);
     });
 };
 
 // Helper function to send notifications to specific users
 export const sendNotificationToUser = (userId: string, notification: any) => {
-    const io = getIO();
-    io.to(`user:${userId}`).emit("notification", notification);
+    sendToRoom(`user:${userId}`, "notification", notification);
 };
